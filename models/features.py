@@ -84,4 +84,5 @@ class Features:
                     list_tmp.append(df[df.columns[-1:]])
 
         self.df_macro_data = get_df_x(list_tmp)
+        print("created features ")
 
