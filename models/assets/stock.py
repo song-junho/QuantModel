@@ -14,30 +14,37 @@ class Stock(metaclass=ABCMeta):
 
         self.df_x = df_features
         self.dict_df_y = {}
-        self.asset_type = "stock"
+        self.asset_type = None
+        self.feature_type = None
+
+        self.dict_model = {}
+        self.df_model_score = pd.DataFrame()
+
+    @abstractmethod
+    def set_type(self):
+        self.asset_type = None
         self.feature_type = None
 
     @abstractmethod
     def set_y(self):
         self.dict_df_y = {}
 
-    @staticmethod
-    def save_model(dict_model, df_model_score, asset_type, feature_type, target_freq):
+    def save_model(self, target_freq):
 
-        with open(r'D:\MyProject\QuantModel\dict_model_{}_{}_{}.pickle'.format(asset_type, feature_type, target_freq), 'wb') as fw:
-            pickle.dump(dict_model, fw)
-        with open(r'D:\MyProject\QuantModel\df_model_score_{}_{}_{}.pickle'.format(asset_type, feature_type, target_freq), 'wb') as fw:
-            pickle.dump(df_model_score, fw)
+        with open(r'D:\MyProject\QuantModel\dict_model_{}_{}_{}.pickle'.format(self.asset_type, self.feature_type, target_freq), 'wb') as fw:
+            pickle.dump(self.dict_model, fw)
+        with open(r'D:\MyProject\QuantModel\df_model_score_{}_{}_{}.pickle'.format(self.asset_type, self.feature_type, target_freq), 'wb') as fw:
+            pickle.dump(self.df_model_score, fw)
 
     def create_model(self, target_freq="3M"):
 
-        df_model_score = pd.DataFrame()
         list_model_theme = []
-        dict_model = {}
 
         for key_nm in tqdm(self.dict_df_y.keys()):
 
             df_y = self.dict_df_y[key_nm][[target_freq]]
+            if len(df_y) == 0:
+                continue
 
             # 타겟데이터 라벨링
             ## '0' : 많이 하락한 경우
@@ -45,7 +52,7 @@ class Stock(metaclass=ABCMeta):
             ## '2' : 많이 오른 경우
             df_y["class"] = "1"
             df_y["class"] = df_y[target_freq].apply(lambda x: "2" if x > 0.10 else ("0" if x < -0.10 else "1"))
-            df_y = df_y.shift(1)
+            df_y = df_y.shift(1)  # 타겟 값 한달뒤로 shift
 
             # class 0 값 개수 조절
             class_0 = df_y[df_y["class"] == "0"]
@@ -64,11 +71,21 @@ class Stock(metaclass=ABCMeta):
             else:
                 pass
 
+            # 타겟 데이터 업데이트가 끊긴 경우 pass
+            if max(df_y.index) < max(self.df_x.index):
+                print(key_nm)
+                continue
+
             # 1. target 값 na인 경우 제거
             df_y = df_y[~df_y[target_freq].isna()][["class"]]
 
-            # 2. x 변인 전처리
-            df_x = self.df_x.loc[df_y.index]
+            list_time = set(self.df_x.index) & set(df_y.index)
+
+            # 1. y 변인 일자 필터링
+            df_y = df_y.loc[list_time]
+
+            # 2. x 변인 일자 필터링
+            df_x = self.df_x.loc[list_time]
             df_x = df_x.replace([np.nan], 0)
 
             # 3. train, test 데이터 분리
@@ -88,27 +105,43 @@ class Stock(metaclass=ABCMeta):
             df = pd.DataFrame({"key_nm": [key_nm], "train_score": [train_score], "test_score": [test_score]})
 
             list_model_theme.append(df)
-            dict_model[key_nm] = best_model
+            self.dict_model[key_nm] = best_model
 
         # 모델 score 데이터 통합
-        df_model_score = pd.concat(list_model_theme)
-
-        # 모델 저장
-        self.save_model(dict_model, df_model_score, self.asset_type, self.feature_type, target_freq)
+        self.df_model_score = pd.concat(list_model_theme)
 
     def run(self, list_target_freq):
 
+        self.set_type()
+        self.set_y()
+
         for target_freq in list_target_freq:
+            # 모델 생성
             self.create_model(target_freq)
-            print("save model ", self.__class__.__name__ , target_freq)
+
+            # 모델 저장
+            self.save_model(target_freq)
+            print("save model ", self.__class__.__name__, target_freq)
+
+
+class KrxStock(Stock):
+
+    def set_type(self):
+        self.asset_type = 'stock'
+        self.feature_type = 'krx'
+
+    def set_y(self):
+        with open(r'D:\MyProject\StockPrice\dict_stock_krx_chg_freq.pickle', 'rb') as fr:
+            self.dict_df_y = pickle.load(fr)
 
 
 class ThemeStock(Stock):
 
-    feature_type = "theme"
+    def set_type(self):
+        self.asset_type = 'stock'
+        self.feature_type = 'theme'
 
     def set_y(self):
-        with open(r'D:\MyProject\StockPrice\DictThemeChgFreq.pickle', 'rb') as fr:
+        with open(r'D:\MyProject\StockPrice\dict_stock_theme_chg_freq.pickle', 'rb') as fr:
             self.dict_df_y = pickle.load(fr)
-
 
