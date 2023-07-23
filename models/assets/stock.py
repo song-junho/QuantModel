@@ -20,6 +20,8 @@ class Stock(metaclass=ABCMeta):
         self.dict_model = {}
         self.df_model_score = pd.DataFrame()
 
+        self.dict_df_price = {}
+
     @abstractmethod
     def set_type(self):
         self.asset_type = None
@@ -28,6 +30,10 @@ class Stock(metaclass=ABCMeta):
     @abstractmethod
     def set_y(self):
         self.dict_df_y = {}
+
+    @abstractmethod
+    def set_price(self):
+        self.dict_df_price = {}
 
     def save_model(self, target_freq):
 
@@ -84,8 +90,16 @@ class Stock(metaclass=ABCMeta):
             # 1. y 변인 일자 필터링
             df_y = df_y.loc[list_time]
 
+            # x 변인, 가격 레벨(z_score) 추가
+            df_price = self.dict_df_price[key_nm]
+            col_z_score = list(filter(lambda x: x[:7] == "z_score", list(df_price.columns)))
+            df_price = df_price[col_z_score].resample("1M").last()
+            df_price = df_price.T.fillna(method="ffill").T
+            df_price = df_price[~df_price["z_score_20"].isna()]
+            df_x = pd.merge(left=self.df_x, right=df_price, left_index=True, right_index=True, how="left")
+
             # 2. x 변인 일자 필터링
-            df_x = self.df_x.loc[list_time]
+            df_x = df_x.loc[list_time]
             df_x = df_x.replace([np.nan], 0)
 
             # 3. train, test 데이터 분리
@@ -114,6 +128,7 @@ class Stock(metaclass=ABCMeta):
 
         self.set_type()
         self.set_y()
+        self.set_price()
 
         for target_freq in list_target_freq:
             # 모델 생성
@@ -134,6 +149,11 @@ class KrxStock(Stock):
         with open(r'D:\MyProject\StockPrice\dict_stock_krx_chg_freq.pickle', 'rb') as fr:
             self.dict_df_y = pickle.load(fr)
 
+    def set_price(self):
+
+        with open(r"D:\MyProject\StockPrice\DictDfStock.pickle", 'rb') as fr:
+            self.dict_df_price = pickle.load(fr)
+
 
 class ThemeStock(Stock):
 
@@ -144,4 +164,9 @@ class ThemeStock(Stock):
     def set_y(self):
         with open(r'D:\MyProject\StockPrice\dict_stock_theme_chg_freq.pickle', 'rb') as fr:
             self.dict_df_y = pickle.load(fr)
+
+    def set_price(self):
+
+        with open(r'D:\MyProject\StockPrice\DictThemeIndex.pickle', 'rb') as fr:
+            self.dict_df_price = pickle.load(fr)
 
