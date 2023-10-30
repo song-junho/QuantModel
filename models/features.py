@@ -6,6 +6,9 @@ from functools import reduce
 import pandas as pd
 import numpy as np
 import warnings
+import db
+from datetime import datetime
+
 warnings.filterwarnings('ignore')
 
 
@@ -15,10 +18,11 @@ def get_df_x(list_tmp):
                   list_tmp)
 
     #  drop columns , 너무 적은 데이터 제거
-    df_tmp = pd.DataFrame()
+    stack_ = []
     for col_nm in df_x.columns:
         nan_len = len(df_x[df_x[col_nm].isna()])
-        df_tmp = df_tmp.append({"col_nm": col_nm, "count": nan_len}, ignore_index=True)
+        stack_.append(pd.DataFrame({"col_nm": [col_nm], "count": [nan_len]}))
+    df_tmp = pd.concat(stack_)
 
     drop_col_list = df_tmp[df_tmp["count"] > 350]["col_nm"].to_list()
     df_x = df_x.drop(columns=drop_col_list)
@@ -38,8 +42,9 @@ class Features:
         with open(r'D:\MyProject\MyData\MacroData\MacroData.pickle', 'rb') as fr:
             self.dict_macro_data = pickle.load(fr)
 
-        with open(r'D:\MyProject\MyData\MacroData\MacroDataInfo.pickle', 'rb') as fr:
-            self.dict_macro_data_info = pickle.load(fr)
+        q = 'SELECT * FROM financial_data.macro_info'
+        self.df_macro_info = pd.read_sql_query(q, db.conn)
+        self.df_macro_info = self.df_macro_info.drop_duplicates("ticker")  # 임시
 
         self.df_macro_data = pd.DataFrame()
         self.__set_macro_data()
@@ -49,39 +54,47 @@ class Features:
         # 1. 매크로 데이터 형 변환
         window_size = 12 * 3  # z_score 산출 window size
 
-        for macro_type in self.dict_macro_data.keys():
+        for i, rows in tqdm(self.df_macro_info.iterrows(), total=len(self.df_macro_info)):
 
-            for macro_type_sub in self.dict_macro_data[macro_type].keys():
+            ticker = rows["ticker"]
+            freq = rows["freq"]
 
-                for key_nm, df_macro in tqdm(self.dict_macro_data[macro_type][macro_type_sub].items()):
+            df_macro = self.dict_macro_data[ticker]
 
-                    freq = self.dict_macro_data_info[macro_type][macro_type_sub][key_nm]["freq"]
+            apply_col = "val"
+            if freq == "d":
+                apply_col = "val"
+            elif freq == "m":
+                apply_col = "pct_chg"
+            elif freq == "q":
+                apply_col = "pct_chg"
+            elif freq == "y":
+                apply_col = "pct_chg"
 
-                    apply_col = "val"
-                    if freq == "d":
-                        apply_col = "val"
-                    elif freq == "m":
-                        apply_col = "pct_chg"
-                    elif freq == "q":
-                        apply_col = "pct_chg"
-                    elif freq == "y":
-                        apply_col = "pct_chg"
+            df_macro_data = df_macro.resample("1M").last().fillna(method='ffill')
+            df_macro_data = df_macro_data[~df_macro_data[apply_col].isna()]
+            df_macro_data["z_score"] = df_macro_data[apply_col].rolling(window_size).apply(lambda x: stats.zscore(x)[-1])
 
-                    df_macro_data = df_macro.resample("1M").last().fillna(method='ffill')
-                    df_macro_data = df_macro_data[~df_macro_data[apply_col].isna()]
-                    df_macro_data["z_score"] = df_macro_data[apply_col].rolling(window_size).apply(lambda x: stats.zscore(x)[-1])
-
-                    self.dict_macro_data[macro_type][macro_type_sub][key_nm] = df_macro_data
+            self.dict_macro_data[ticker] = df_macro_data
 
         # 2. 자료구조 변경 (dict -> DataFrame)
         list_tmp = []
-        for macro_type in self.dict_macro_data.keys():
-            for macro_type_sub in self.dict_macro_data[macro_type].keys():
-                for key_nm, df_macro in tqdm(self.dict_macro_data[macro_type][macro_type_sub].items()):
-                    df = copy.deepcopy(df_macro)
-                    df = df.rename(columns={"z_score": key_nm})
+        for i, rows in tqdm(self.df_macro_info.iterrows(), total=len(self.df_macro_info)):
 
-                    list_tmp.append(df[df.columns[-1:]])
+            ticker = rows["ticker"]
+            df = copy.deepcopy(self.dict_macro_data[ticker])
+
+            # 업데이트 일자가 3달 초과한 데이터는 pass
+            if len(df) == 0:
+                continue
+
+            # 업데이트 일자가 3달 초과한 데이터는 pass
+            if (datetime.today() - df.index[-1]).days > 90:
+                continue
+
+            df = df.rename(columns={"z_score": ticker})
+
+            list_tmp.append(df[df.columns[-1:]])
 
         self.df_macro_data = get_df_x(list_tmp)
         print("created features ")

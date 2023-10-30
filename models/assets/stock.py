@@ -85,7 +85,7 @@ class Stock(metaclass=ABCMeta):
             # 1. target 값 na인 경우 제거
             df_y = df_y[~df_y[target_freq].isna()][["class"]]
 
-            list_time = set(self.df_x.index) & set(df_y.index)
+            list_time = list(set(self.df_x.index) & set(df_y.index))
 
             # 1. y 변인 일자 필터링
             df_y = df_y.loc[list_time]

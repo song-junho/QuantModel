@@ -1,10 +1,6 @@
 import models.features
 import models.assets.stock
 
-def main():
-
-    pass
-
 if __name__ == "__main__":
 
     # 1. Feature 로 사용할 매크로 변수 초기화
